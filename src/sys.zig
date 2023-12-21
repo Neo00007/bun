@@ -740,9 +740,9 @@ pub fn writev(fd: bun.FileDescriptor, buffers: []std.os.iovec) Maybe(usize) {
     }
 }
 
-pub fn pwritev(fd: bun.FileDescriptor, buffers: []std.os.iovec, position: isize) Maybe(usize) {
+pub fn pwritev(fd: bun.FileDescriptor, buffers: []const std.os.iovec_const, position: isize) Maybe(usize) {
     if (comptime Environment.isMac) {
-        const rc = pwritev_sym(fd, @as([*]std.os.iovec_const, @ptrCast(buffers.ptr)), @as(i32, @intCast(buffers.len)), position);
+        const rc = pwritev_sym(fd, buffers.ptr, @as(i32, @intCast(buffers.len)), position);
         if (comptime Environment.allow_assert)
             log("pwritev({d}, {d}) = {d}", .{ fd, veclen(buffers), rc });
 
@@ -753,7 +753,7 @@ pub fn pwritev(fd: bun.FileDescriptor, buffers: []std.os.iovec, position: isize)
         return Maybe(usize){ .result = @as(usize, @intCast(rc)) };
     } else {
         while (true) {
-            const rc = pwritev_sym(fd, @as([*]std.os.iovec_const, @ptrCast(buffers.ptr)), buffers.len, position);
+            const rc = pwritev_sym(fd, buffers.ptr, buffers.len, position);
             if (comptime Environment.allow_assert)
                 log("pwritev({d}, {d}) = {d}", .{ fd, veclen(buffers), rc });
 
@@ -1231,7 +1231,7 @@ pub fn getFdPath(fd: bun.FileDescriptor, out_buffer: *[MAX_PATH_BYTES]u8) Maybe(
 /// Use of a mapped region can result in these signals:
 /// * SIGSEGV - Attempted write into a region mapped as read-only.
 /// * SIGBUS - Attempted  access to a portion of the buffer that does not correspond to the file
-fn mmap(
+pub fn mmap(
     ptr: ?[*]align(mem.page_size) u8,
     length: usize,
     prot: u32,
@@ -1518,6 +1518,38 @@ pub fn exists(path: []const u8) bool {
     }
 
     @compileError("TODO: existsOSPath");
+}
+
+pub fn existsAt(fd: bun.FileDescriptor, subpath: []const u8) bool {
+    if (comptime Environment.isPosix) {
+        return system.faccessat(bun.toFD(fd), &(std.os.toPosixPath(subpath) catch return false), 0, 0) == 0;
+    }
+
+    if (comptime Environment.isWindows) {
+        // TODO(dylan-conway): this is not tested
+        var wbuf: bun.MAX_WPATH = undefined;
+        const path_to_use = bun.strings.toWPath(&wbuf, subpath);
+        const nt_name = windows.UNICODE_STRING{
+            .Length = path_to_use.len * 2,
+            .MaximumLength = path_to_use.len * 2,
+            .Buffer = path_to_use,
+        };
+        const attr = windows.OBJECT_ATTRIBUTES{
+            .Length = @sizeOf(windows.OBJECT_ATTRIBUTES),
+            .RootDirectory = bun.toFD(fd),
+            .Attributes = 0,
+            .ObjectName = &nt_name,
+            .SecurityDescriptor = null,
+            .SecurityQualityOfService = null,
+        };
+        const basic_info: windows.FILE_BASIC_INFORMATION = undefined;
+        return switch (kernel32.NtQueryAttributesFile(&attr, basic_info)) {
+            .SUCCESS => true,
+            else => false,
+        };
+    }
+
+    @compileError("TODO: existsAtOSPath");
 }
 
 pub extern "C" fn is_executable_file(path: [*:0]const u8) bool;
