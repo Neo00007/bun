@@ -5,7 +5,7 @@
   "dependencies": {
     "@types/node": "*",
     "@types/ws": "*",
-    "undici-types": "~5.26.4"
+    "undici-types": "~5.28.3"
   },
   "devDependencies": {
     "@definitelytyped/dtslint": "^0.0.199",
